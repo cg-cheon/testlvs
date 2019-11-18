@@ -1,0 +1,173 @@
+README file for TESTLVS
+Simple throughput testing tool for the Linux Virtual Server
+Version 0.1
+Julian Anastasov <ja@ssi.bg>
+
+
+
+The main goals:
+
+- to  test the throughput in packets/sec for a LVS director:
+the hash functions and the connection table management
+
+- to  test  the  anti-DDoS  defense  strategies  in  the LVS
+director
+
+- to   show   how   LVS  performs   on   different  hardware
+configurations  (your  best results  can be  put on  the LVS
+site). There are users that need this information.
+
+
+How it is working:
+
+
+	The testlvs program is started on one or many client
+hosts.   The preferred  setup can include  many clients, LVS
+director   and  many   real  servers   in  a   switched  hub
+environment  but  there  are  no  restrictions  in  the used
+network  topology. You need at least one client host running
+testlvs,  the  LVS  director and  one  real  server. testlvs
+simulates  traffic from many different client hosts but sent
+from one host using source address spoofing.  By this way we
+create  many entries  in the  LVS connection  table and load
+the  director  near  its  limits,  just  like  in production
+environment.   For this, you probably  will need two or more
+client hosts running testlvs.
+
+
+	The  LVS director is set to serve packets by setting
+up  a  virtual  service.  No  restrictions  again.   Any LVS
+forwarding  method  can  be  used  for  the  test  (not  for
+LVS/LOCAL, you don't need it). You test your setup, though.
+
+	testlvs sends specified from the user TCP SYN or UDP
+requests   to  the  virtual  service.   These  requests  are
+scheduled  from LVS to the real servers where we run scripts
+that  monitor the traffic coming  from the director. That is
+all.   We  try not  to  run any  real  services in  the real
+servers  that  will return  answers  for these  requests. We
+even  don't use  tools that return  the traffic  back to the
+client.  We don't account the throughput in the clients. The
+goal  is  not to  load any  other  resources except  the LVS
+director.  The traffic is extracted  from the kernel network
+statistics in the real servers.
+
+
+	Here is one possible test setup:
+
+Client 1	Client 2	LVS Director	RS1	RS2
+|		   |		   |		 |	 |
+`------------------+---------------+-------------+-------'
+		Switched HUB
+
+
+	Clasic  LVS/DR with clients and cluster on same LAN.
+In  the real world  the incoming router  (where the requests
+come) is on the same switched hub.
+
+	For LVS/NAT the problem is that we don't account the
+outgoing  traffic in the  LVS director coming  from the real
+servers.   This  problem can  be  solved if  the  traffic is
+replied from the real servers.
+
+
+Installation:
+
+	To  build  testlvs  type  'make'.   You  can install
+testlvs at any place.
+
+
+Usage:
+
+	The client hosts run, for example:
+
+./testlvs 192.168.0.1:80 -tcp -srcnum 100000 -packets 5000000
+
+	We  flood  the  director with  packets  from 100,000
+	different  source addresses, the source port is same
+	(5000, can not be changed currently, we assume it is
+	not  useful  for  the  test).   The  default initial
+	source address is 10.0.0.1.
+
+	-packets  0 means  "send requests  forever". Default
+	is  1 (send  one packet, usually  for testing before
+	the real test)
+
+	For  the first  test you  can start  testlvs without
+specifyng  the -packets  option. This will  allow the packet
+to  be traced with  packet sniffer, i.e.  whether we achieve
+the  expected result  not to  send packets  out of  our test
+setup.
+
+
+	In the real servers:
+
+	On  each real server we  add routing rules that must
+ignore  the  incoming traffic.   Our goal  is to  drop these
+requests   after  they   are  accounted   in  the  interface
+statistics. We need to know only the number of these packets
+(and may be the bytes if needed).
+
+	We can drop the incoming packets in the real servers
+in different ways, for example:
+
+	a>
+
+	route add -net 10.0.0.0 netmask 255.0.0.0 reject
+
+	b>
+
+	ip rule add prio 100 from 192.168.0.1 table 100
+	ip route add table 100 blackhole 10/8
+
+	So,  on each real server we run a program that shows
+the rate of the incoming packets. We assume the only traffic
+accounted  is  from the  incoming  requests coming  from the
+director. So, we run, for example:
+
+	./show_traffic.sh eth0
+
+	or
+
+	./show_traffic.sh
+
+	This  simple  script shows  the incoming  traffic in
+packets/sec  on each 10 seconds. Then  you can sum all these
+values  from all real server. You  can create other tools to
+monitor the incoming packets. The statistics can be accessed
+from /proc/net/dev or /proc/net/snmp, for example.
+
+
+
+	The  testlvs  program  has  many  options.  You  can
+specify:
+
+- the  number  of  different source  addresses  to  use when
+sending the packets
+
+- the  Time-to-Live (TTL) for the packets: we don't want the
+packets to leave our test cluster
+
+- to  send  the packets  with random  source address  in the
+specified range, i.e. not in the default sequential order
+
+- the packet size (for UDP)
+
+- the  protocol: 40-byte TCP SYN packets or UDP packets with
+specific data size
+
+	For  TCP we send only SYN packets without data part.
+We don't want to receive RST packets from director (if using
+ACK flag with the data packets).
+
+	Sending  UDP packets allows testing the LVS director
+with  longer packets.  We  assume the UDP  test is preferred
+for testing the throughput - we can control the packet size.
+The  TCP and UDP packet handling are not very different.
+
+	The  packet  size can  not be  longer than  the MTU.
+Such  setup is not good for the performance if we defragment
+each request.
+
+
+
